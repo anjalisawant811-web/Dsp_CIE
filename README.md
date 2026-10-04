@@ -59,3 +59,4 @@ All 1702 images segment without failure. API tested: sample + upload analysis, i
 * Health thresholds are generic engineering rules, not agronomically validated for a specific crop.
 * Future: live sensor stream (ESP32/MQTT), SPAD calibration, other filters (Chebyshev, FIR, notch), lesion segmentation, per-crop thresholds.
 "# Dsp_CIE" 
+"# Dsp_CIE" 
