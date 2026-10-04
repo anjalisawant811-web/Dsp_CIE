@@ -4,12 +4,40 @@ from scipy import signal
 
 
 def spectrum(x, fs):
-    """Single-sided magnitude spectrum via FFT (DC removed so it does not hide other bins)."""
-    x = np.asarray(x, float) - np.mean(x)
+    """Single-sided amplitude spectrum of x[n] using the FFT.
+
+    Steps:
+      1. Remove the mean (DC) so the 0 Hz bin does not hide the other frequencies.
+      2. Multiply by a Hann window to reduce spectral leakage.
+      3. rfft -> one-sided spectrum, frequency axis f_k = k*fs/N  (0 ... fs/2).
+      4. Scale by 2/sum(w) so a sine of amplitude A shows a peak of height A.
+         (The window lowers the signal level; sum(w) is the "coherent gain" correction.
+          Dividing by N instead would under-read the amplitude by about half for Hann.)
+    """
+    x = np.asarray(x, float)
+    x = x - np.mean(x)
     N = len(x)
-    X = np.fft.rfft(x * np.hanning(N))          # Hann window reduces spectral leakage
+    w = np.hanning(N)
+    X = np.fft.rfft(x * w)
     f = np.fft.rfftfreq(N, d=1.0 / fs)
-    return f, (2.0 / N) * np.abs(X)
+    mag = 2.0 * np.abs(X) / np.sum(w)
+    mag[0] = mag[0] / 2.0                      # DC bin is not mirrored, so no doubling
+    if N % 2 == 0:
+        mag[-1] = mag[-1] / 2.0                # Nyquist bin is not mirrored either
+    return f, mag
+
+
+def dominant_frequency(f, mag):
+    """Strongest non-DC peak. Parabolic interpolation refines it between FFT bins."""
+    if len(mag) < 4:
+        return 0.0, 0.0
+    k = int(np.argmax(mag[1:])) + 1
+    if 1 <= k < len(mag) - 1:
+        a, b, c = mag[k - 1], mag[k], mag[k + 1]
+        denom = a - 2 * b + c
+        shift = 0.5 * (a - c) / denom if denom != 0 else 0.0
+        return float(f[k] + shift * (f[1] - f[0])), float(b)
+    return float(f[k]), float(mag[k])
 
 
 def butter_lowpass(x, fs, cutoff, order):
@@ -45,6 +73,7 @@ def run_dsp(x, fs, cutoff, order):
     y, sos, w, h_db = butter_lowpass(x, fs, cutoff, order)
     f1, m1 = spectrum(x, fs)
     f2, m2 = spectrum(y, fs)
+    peak_f, peak_a = dominant_frequency(f1, m1)
     r = lambda a: np.round(a, 4).tolist()
     return {
         "n": list(range(len(x))), "raw": r(x), "filtered": r(y),
@@ -52,5 +81,7 @@ def run_dsp(x, fs, cutoff, order):
         "filter_response": {"freq": r(w), "gain_db": r(h_db)},
         "params": {"fs": fs, "cutoff": cutoff, "order": order, "nyquist": fs / 2, "N": len(x),
                    "freq_resolution": round(fs / len(x), 5), "filter_type": "Butterworth IIR low-pass (zero-phase, sosfiltfilt)"},
+        "dominant": {"frequency": round(peak_f, 4), "amplitude": round(peak_a, 4),
+                     "period_samples": round(1 / peak_f, 2) if peak_f > 0 else None},
         "metrics": noise_metrics(x, y, f1, m1, f2, m2, cutoff),
     }
